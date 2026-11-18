@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TTU Smart Face & ID Attendance</title>
+  <!-- Load face-api.js from CDN -->
+  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <style>
+    :root {
+      --primary: #0f4c81;
+      --primary-hover: #0a365c;
+      --success: #15803d;
+      --error: #b91c1c;
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --text: #1e293b;
+      --muted: #64748b;
+    }
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    body {
+      margin: 0;
+      padding: 20px;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+    }
+    .container {
+      width: 100%;
+      max-width: 540px;
+      background: var(--card);
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    }
+    h1 { margin: 0 0 4px; font-size: 1.4rem; color: var(--primary); }
+    .subtitle { margin: 0 0 20px; font-size: 0.9rem; color: var(--muted); }
+
+    /* Mode Tabs */
+    .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+    .tab-btn {
+      flex: 1;
+      padding: 10px;
+      border: 1px solid #cbd5e1;
+      background: #f8fafc;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      color: var(--text);
+    }
+    .tab-btn.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
+    /* Webcam Box */
+    .video-wrapper {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      background: #0f172a;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+    video, canvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1); /* Mirror selfie view */
+    }
+    .cam-badge {
+      position: absolute;
+      bottom: 10px; left: 10px;
+      background: rgba(15, 23, 42, 0.8);
+      color: #fff;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      z-index: 10;
+    }
+
+    /* Form Controls */
+    .form-group { margin-bottom: 14px; }
+    label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 5px; }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 1rem;
+    }
+    input:focus { outline: none; border-color: var(--primary); }
+    .row { display: flex; gap: 10px; }
+    .row .form-group { flex: 1; }
+
+    button.action-btn {
+      width: 100%;
+      padding: 12px;
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 6px;
+    }
+    button.action-btn:hover:not(:disabled) { background: var(--primary-hover); }
+    button.action-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    /* Status Box */
+    .status {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      display: none;
+      line-height: 1.4;
+    }
+    .status.info { display: block; background: #e0f2fe; color: #0369a1; }
+    .status.success { display: block; background: #dcfce7; color: var(--success); }
+    .status.error { display: block; background: #fee2e2; color: var(--error); }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>Tamale Technical University</h1>
+  <p class="subtitle">Biometric & ID Lecture Attendance System</p>
+
+  <!-- Mode Switcher -->
+  <div class="tabs">
+    <button class="tab-btn active" id="tabCheckin" onclick="switchMode('checkin')">Daily Check-In</button>
+    <button class="tab-btn" id="tabEnroll" onclick="switchMode('enroll')">Student Enrollment</button>
+  </div>
+
+  <!-- Live Camera Feed -->
+  <div class="video-wrapper">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="overlay"></canvas>
+    <div class="cam-badge" id="camBadge">Loading AI models...</div>
+  </div>
+
+  <!-- CHECK-IN FORM -->
+  <div id="checkinForm">
+    <div class="row">
+      <div class="form-group">
+        <label for="courseCode">Course / Session Code</label>
+        <input type="text" id="courseCode" placeholder="e.g. BCH301" value="BCH301" />
+      </div>
+      <div class="form-group">
+        <label for="sessionPin">Lecture PIN</label>
+        <input type="password" id="sessionPin" placeholder="4-digit PIN" maxlength="8" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="checkinId">Student Unique ID</label>
+      <input type="text" id="checkinId" placeholder="e.g. TTU/2026/001" />
+    </div>
+    <button class="action-btn" id="btnCheckin" onclick="handleCheckIn()" disabled>
+      Verify Face & Mark Attendance
+    </button>
+  </div>
+
+  <!-- ENROLLMENT FORM -->
+  <div id="enrollForm" class="hidden">
+    <div class="form-group">
+      <label for="enrollId">Student Unique ID</label>
+      <input type="text" id="enrollId" placeholder="e.g. TTU/2026/001" />
+    </div>
+    <div class="form-group">
+      <label for="enrollName">Full Name</label>
+      <input type="text" id="enrollName" placeholder="e.g. Abubakari Sadik" />
+    </div>
+    <button class="action-btn" id="btnEnroll" onclick="handleEnrollment()" disabled>
+      Capture Face & Enroll Student
+    </button>
+  </div>
+
+  <!-- Feedback Banner -->
+  <div id="statusBox" class="status"></div>
+</div>
+
+<script>
+  // =========================================================
+  // 1. CONFIGURATION
+  // =========================================================
+  const APPS_SCRIPT_URL = 'YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL';
+  // Public GitHub mirror hosting official face-api.js weights
+  const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
+  const MATCH_THRESHOLD = 0.50; // Must match or be stricter than backend CONFIG
+
+  let currentMode = 'checkin';
+  let modelsLoaded = false;
+
+  // Generate or retrieve a persistent browser Device ID to deter multi-student phone sharing
+  function getDeviceId() {
+    let id = localStorage.getItem('ttu_attendance_device_id');
+    if (!id) {
+      id = 'DEV-' + Math.random().toString(36).substring(2, 10).toUpperCase();
+      localStorage.setItem('ttu_attendance_device_id', id);
+    }
+    return id;
+  }
+
+  // =========================================================
+  // 2. INITIALIZE CAMERA & FACE-API MODELS
+  // =========================================================
+  window.addEventListener('DOMContentLoaded', async () => {
+    const video = document.getElementById('video');
+    const badge = document.getElementById('camBadge');
+
+    try {
+      badge.textContent = 'Loading face recognition models...';
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+      ]);
+      modelsLoaded = true;
+
+      badge.textContent = 'Starting camera...';
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false
+      });
+      video.srcObject = stream;
+
+      video.onloadedmetadata = () => {
+        badge.textContent = 'Camera ready — Center face in frame';
+        document.getElementById('btnCheckin').disabled = false;
+        document.getElementById('btnEnroll').disabled = false;
+      };
+    } catch (err) {
+      badge.textContent = 'Camera or model error';
+      showStatus('error', 'Initialization failed: ' + err.message + '. Ensure camera permissions and HTTPS are enabled.');
+    }
+  });
+
+  // =========================================================
+  // 3. UI HELPERS
+  // =========================================================
+  function switchMode(mode) {
+    currentMode = mode;
+    document.getElementById('tabCheckin').classList.toggle('active', mode === 'checkin');
+    document.getElementById('tabEnroll').classList.toggle('active', mode === 'enroll');
+    document.getElementById('checkinForm').classList.toggle('hidden', mode !== 'checkin');
+    document.getElementById('enrollForm').classList.toggle('hidden', mode !== 'enroll');
+    hideStatus();
+  }
+
+  function showStatus(type, msg) {
+    const box = document.getElementById('statusBox');
+    box.className = 'status ' + type;
+    box.textContent = msg;
+  }
+
+  function hideStatus() {
+    const box = document.getElementById('statusBox');
+    box.className = 'status';
+  }
+
+  // =========================================================
+  // 4. LIVENESS CHECK (ANTI-SPOOFING BLINK DETECTOR)
+  // =========================================================
+  function getEyeAspectRatio(eye) {
+    const dist = (p1, p2) => Math.hypot(p1.x - p2.x, p1.y - p2.y);
+    const v1 = dist(eye[1], eye[5]);
+    const v2 = dist(eye[2], eye[4]);
+    const h = dist(eye[0], eye[3]);
+    return (v1 + v2) / (2.0 * h);
+  }
+
+  /**
+   * Prompts the student to blink naturally within 5 seconds so a printed photo
+   * or static phone screen cannot spoof attendance.
+   */
+  async function verifyLivenessBlink(video) {
+    const badge = document.getElementById('camBadge');
+    badge.textContent = 'Liveness check: Please BLINK once...';
+    showStatus('info', 'Anti-spoofing check: Look at the camera and blink once.');
+
+    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
+    const startTime = Date.now();
+    let sawOpenEyes = false;
+
+    while (Date.now() - startTime < 6000) {
+      const detection = await faceapi
+        .detectSingleFace(video, options)
+        .withFaceLandmarks();
+
+      if (detection) {
+        const leftEAR = getEyeAspectRatio(detection.landmarks.getLeftEye());
+        const rightEAR = getEyeAspectRatio(detection.landmarks.getRightEye());
+        const avgEAR = (leftEAR + rightEAR) / 2.0;
+
+        if (avgEAR > 0.27) sawOpenEyes = true;
+        // Blink detected when open eyes drop below threshold
+        if (sawOpenEyes && avgEAR < 0.22) {
+          badge.textContent = 'Liveness verified!';
+          return true;
+        }
+      }
+      await new Promise(r => setTimeout(r, 120));
+    }
+
+    badge.textContent = 'Camera ready';
+    return false;
+  }
+
+  // =========================================================
+  // 5. CAPTURE 128-POINT FACE DESCRIPTOR
+  // =========================================================
+  async function captureSingleDescriptor() {
+    const video = document.getElementById('video');
+    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
+
+    const detections = await faceapi
+      .detectAllFaces(video, options)
+      .withFaceLandmarks()
+      .withFaceDescriptors();
+
+    if (detections.length === 0) {
+      throw new Error('No face detected. Ensure good lighting and look directly at the camera.');
+    }
+    if (detections.length > 1) {
+      throw new Error('Multiple faces detected. Only one student should be in front of the camera.');
+    }
+
+    // Convert Float32Array to standard JS Array of 128 numbers for JSON serialization
+    return Array.from(detections[0].descriptor);
+  }
+
+  // =========================================================
+  // 6. STUDENT ENROLLMENT HANDLER
+  // =========================================================
+  async function handleEnrollment() {
+    const btn = document.getElementById('btnEnroll');
+    const studentId = document.getElementById('enrollId').value.trim();
+    const fullName = document.getElementById('enrollName').value.trim();
+
+    if (!studentId || !fullName) {
+      return showStatus('error', 'Please enter both Student ID and Full Name.');
+    }
+
+    btn.disabled = true;
+    try {
+      showStatus('info', 'Scanning face geometry... Hold still.');
+      const descriptor = await captureSingleDescriptor();
+
+      showStatus('info', 'Saving enrollment to Google Sheets...');
+      const response = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // Avoids CORS preflight
+        body: JSON.stringify({
+          action: 'enroll',
+          studentId,
+          fullName,
+          descriptor
+        })
+      });
+
+      const result = await response.json();
+      if (result.status === 'ok') {
+        showStatus('success', result.message);
+        document.getElementById('enrollId').value = '';
+        document.getElementById('enrollName').value = '';
+      } else {
+        showStatus('error', result.message);
+      }
+    } catch (err) {
+      showStatus('error', err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // =========================================================
+  // 7. DAILY ATTENDANCE CHECK-IN HANDLER
+  // =========================================================
+  async function handleCheckIn() {
+    const btn = document.getElementById('btnCheckin');
+    const studentId = document.getElementById('checkinId').value.trim();
+    const sessionCode = document.getElementById('courseCode').value.trim();
+    const pin = document.getElementById('sessionPin').value.trim();
+
+    if (!studentId || !sessionCode) {
+      return showStatus('error', 'Please enter Course Code and Student ID.');
+    }
+
+    btn.disabled = true;
+    try {
+      // Step 1: Fetch stored descriptor for this Student ID from Google Sheets
+      showStatus('info', 'Fetching student record...');
+      const getUrl = `${APPS_SCRIPT_URL}?action=getStudent&studentId=${encodeURIComponent(studentId)}`;
+      const studentRes = await fetch(getUrl);
+      const studentData = await studentRes.json();
+
+      if (studentData.status !== 'ok') {
+        throw new Error(studentData.message);
+      }
+
+      // Step 2: Run anti-spoofing blink check
+      const video = document.getElementById('video');
+      const isLive = await verifyLivenessBlink(video);
+      if (!isLive) {
+        throw new Error('Liveness check timed out. Please blink naturally while looking at the camera.');
+      }
+
+      // Step 3: Capture live descriptor & compare Euclidean distance
+      showStatus('info', `Verifying identity for ${studentData.student.fullName}...`);
+      const liveDescriptor = await captureSingleDescriptor();
+      const storedDescriptor = new Float32Array(studentData.student.descriptor);
+      const distance = faceapi.euclideanDistance(liveDescriptor, storedDescriptor);
+
+      if (distance > MATCH_THRESHOLD) {
+        throw new Error(`Face mismatch (score: ${distance.toFixed(3)}). Ensure good lighting or try again.`);
+      }
+
+      // Step 4: Log verified attendance in Google Sheets
+      showStatus('info', 'Face matched! Recording attendance...');
+      const postRes = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'checkin',
+          studentId,
+          sessionCode,
+          pin,
+          matchDistance: distance,
+          deviceId: getDeviceId()
+        })
+      });
+
+      const postResult = await postRes.json();
+      if (postResult.status === 'ok') {
+        showStatus('success', `✅ ${postResult.message} (Match score: ${distance.toFixed(3)})`);
+        document.getElementById('checkinId').value = '';
+      } else {
+        showStatus('error', postResult.message);
+      }
+    } catch (err) {
+      showStatus('error', err.message);
+    } finally {
+      document.getElementById('camBadge').textContent = 'Camera ready — Center face in frame';
+      btn.disabled = false;
+    }
+  }
+</script>
+
+</body>
+</html>
